@@ -1,0 +1,524 @@
+-- Serviços
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+-- Variáveis
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+local humbugEnabled = false
+local currentModel = nil
+local checkInterval = 3 -- Intervalo para verificar (em segundos)
+local clickDelay = 0.5 -- Delay entre cliques
+local navigationSpeed = 20 -- Velocidade do tween
+local currentTween = nil
+
+-- Criar UI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HumbugUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0.15, 0, 0.25, 0)
+frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+frame.AnchorPoint = Vector2.new(0.5, 0.5)
+frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+frame.BorderSizePixel = 2
+frame.BorderColor3 = Color3.fromRGB(255, 255, 255)
+frame.Parent = screenGui
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0.12, 0, 0.2, 0)
+closeButton.Position = UDim2.new(0.88, 0, 0.03, 0)
+closeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 18
+closeButton.Font = Enum.Font.GothamBold
+closeButton.Parent = frame
+
+local cornerClose = Instance.new("UICorner")
+cornerClose.CornerRadius = UDim.new(0, 4)
+cornerClose.Parent = closeButton
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0.27, 0)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+title.Text = "Humbug Auto Collector"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.Parent = frame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0.92, 0, 0.2, 0)
+statusLabel.Position = UDim2.new(0.04, 0, 0.33, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: Desligado"
+statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+statusLabel.TextScaled = true
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = frame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0.8, 0, 0.27, 0)
+toggleButton.Position = UDim2.new(0.1, 0, 0.67, 0)
+toggleButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+toggleButton.Text = "Ligar Modo Humbug"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.TextScaled = true
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Parent = frame
+
+-- Tornar a UI arrastável
+local dragging = false
+local dragInput, mousePos, framePos
+
+frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		mousePos = input.Position
+		framePos = frame.Position
+		
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+frame.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		dragInput = input
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	if dragging and dragInput then
+		local delta = dragInput.Position - mousePos
+		frame.Position = UDim2.new(
+			framePos.X.Scale,
+			framePos.X.Offset + delta.X,
+			framePos.Y.Scale,
+			framePos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+-- Função para clicar na tela
+local function autoClick()
+	local screenSize = workspace.CurrentCamera.ViewportSize
+	local x = screenSize.X / 2
+	local y = screenSize.Y / 2
+	
+	VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+	task.wait(0.01)
+	VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+end
+
+-- Função para verificar se o modelo ainda existe
+local function modelExists(modelData)
+	if not modelData then return false end
+	local model = modelData.model
+	local part = modelData.part
+	return model and model.Parent and part and part.Parent
+end
+
+-- Função para verificar caminho livre
+local function isPathClear(startPos, endPos, checkHeight)
+	-- Criar pontos intermediários para verificar
+	local direction = (endPos - startPos)
+	local distance = direction.Magnitude
+	local stepSize = 5 -- Verificar a cada 5 unidades
+	local steps = math.ceil(distance / stepSize)
+	
+	for i = 1, steps do
+		local t = i / steps
+		local checkPos = startPos:Lerp(endPos, t)
+		
+		-- Ajustar altura baseada no terreno
+		if checkHeight then
+			-- Raycast para baixo para encontrar o chão
+			local ray = Ray.new(checkPos + Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))
+			local hit = workspace:FindPartOnRayWithIgnoreList(ray, {character})
+			
+			if hit then
+				checkPos = Vector3.new(checkPos.X, hit.Position.Y + 3, checkPos.Z)
+			end
+		end
+		
+		-- Verificar se há obstáculos na posição
+		local ray = Ray.new(checkPos + Vector3.new(0, 2, 0), Vector3.new(0, -4, 0))
+		local hit = workspace:FindPartOnRayWithIgnoreList(ray, {character})
+		
+		if not hit then
+			-- Não tem chão nesta posição
+			return false, checkPos
+		end
+	end
+	
+	return true, endPos
+end
+
+-- Função para encontrar caminho inteligente
+local function findSmartPath(startPos, targetPos)
+	-- Primeiro, tentar caminho direto
+	local clear, hitPos = isPathClear(startPos, targetPos, true)
+	
+	if clear then
+		return {targetPos}
+	end
+	
+	-- Se caminho direto não funcionar, tentar pontos intermediários
+	local pathPoints = {}
+	local direction = (targetPos - startPos)
+	local horizontalDir = Vector3.new(direction.X, 0, direction.Z).Unit
+	
+	-- Tentar desviar para os lados
+	local sideOffsets = {
+		Vector3.new(horizontalDir.Z, 0, -horizontalDir.X) * 8,  -- Lado direito
+		Vector3.new(-horizontalDir.Z, 0, horizontalDir.X) * 8,   -- Lado esquerdo
+	}
+	
+	for _, offset in ipairs(sideOffsets) do
+		local sidePoint = startPos + offset
+		local clear1, _ = isPathClear(startPos, sidePoint, true)
+		local clear2, _ = isPathClear(sidePoint, targetPos, true)
+		
+		if clear1 and clear2 then
+			return {sidePoint, targetPos}
+		end
+	end
+	
+	-- Se tudo falhar, tentar subir
+	local upPoint = startPos + Vector3.new(0, 10, 0)
+	local clear1, _ = isPathClear(startPos, upPoint, false)
+	local clear2, _ = isPathClear(upPoint, targetPos, false)
+	
+	if clear1 and clear2 then
+		return {upPoint, targetPos}
+	end
+	
+	-- Último recurso: dividir em segmentos menores
+	local segments = 4
+	local points = {}
+	
+	for i = 1, segments - 1 do
+		local t = i / segments
+		local midPoint = startPos:Lerp(targetPos, t)
+		table.insert(points, midPoint)
+	end
+	
+	table.insert(points, targetPos)
+	return points
+end
+
+-- Função para mover usando TweenService
+local function moveToPosition(targetPositions)
+	if currentTween then
+		currentTween:Cancel()
+		currentTween = nil
+	end
+	
+	if not character or not humanoidRootPart then
+		return
+	end
+	
+	local moveToNextPoint = function(index)
+		if index > #targetPositions then
+			statusLabel.Text = "Status: Chegou ao destino"
+			return true
+		end
+		
+		local targetPos = targetPositions[index]
+		local startPos = humanoidRootPart.Position
+		local distance = (targetPos - startPos).Magnitude
+		local duration = distance / navigationSpeed
+		
+		-- Criar tween para a posição
+		local tweenInfo = TweenInfo.new(
+			duration,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out,
+			0,
+			false,
+			0
+		)
+		
+		-- Calcular direção para olhar
+		local lookDir = (targetPos - startPos)
+		lookDir = Vector3.new(lookDir.X, 0, lookDir.Z)
+		if lookDir.Magnitude > 0 then
+			lookDir = lookDir.Unit
+		end
+		
+		-- Criar CFrame para movimento e rotação
+		local targetCFrame
+		if lookDir.Magnitude > 0 then
+			targetCFrame = CFrame.new(targetPos, targetPos + lookDir)
+		else
+			targetCFrame = CFrame.new(targetPos)
+		end
+		
+		currentTween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = targetCFrame})
+		
+		currentTween.Completed:Connect(function()
+			currentTween = nil
+			if humbugEnabled then
+				moveToNextPoint(index + 1)
+			end
+		end)
+		
+		statusLabel.Text = "Status: Movendo (" .. index .. "/" .. #targetPositions .. ")"
+		currentTween:Play()
+		
+		return false
+	end
+	
+	return moveToNextPoint(1)
+end
+
+-- Função para olhar para o modelo
+local function lookAtModel(targetPosition)
+	if not character or not humanoidRootPart then
+		return
+	end
+	
+	local currentPosition = humanoidRootPart.Position
+	local direction = (targetPosition - currentPosition).Unit
+	
+	-- Calcular rotação para olhar para o modelo
+	local lookVector = Vector3.new(direction.X, 0, direction.Z)
+	if lookVector.Magnitude > 0 then
+		-- Usar tween suave para rotação
+		local targetCFrame = CFrame.new(currentPosition, currentPosition + lookVector)
+		local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = targetCFrame})
+		tween:Play()
+	end
+end
+
+-- Função para obter modelos da pasta HumbugWorkspace
+local function getHumbugModels()
+	local workspace = game:GetService("Workspace")
+	local humbugFolder = workspace:FindFirstChild("HumbugWorkspace")
+	
+	if not humbugFolder then
+		return nil
+	end
+	
+	local models = {}
+	for _, descendant in ipairs(humbugFolder:GetDescendants()) do
+		if descendant:IsA("Model") and descendant.Name == "PetModel" then
+			-- Pegar qualquer parte do modelo
+			local targetPart = descendant.PrimaryPart or descendant:FindFirstChildWhichIsA("BasePart", true)
+			if targetPart then
+				table.insert(models, {model = descendant, part = targetPart})
+			end
+		end
+	end
+	
+	return models
+end
+
+-- Função para encontrar o modelo mais próximo com caminho válido
+local function findBestModel()
+	local models = getHumbugModels()
+	if not models or #models == 0 then
+		return nil
+	end
+	
+	if not character or not humanoidRootPart then
+		return models[1]
+	end
+	
+	local currentPos = humanoidRootPart.Position
+	local bestModel = nil
+	local bestScore = math.huge
+	
+	for _, modelData in ipairs(models) do
+		if modelData.part and modelData.part.Parent then
+			local targetPos = modelData.part.Position
+			local distance = (targetPos - currentPos).Magnitude
+			
+			-- Verificar se o caminho é acessível
+			local clear, hitPos = isPathClear(currentPos, targetPos, true)
+			
+			-- Calcular score (menor é melhor)
+			local score = distance
+			if not clear then
+				score = score * 1.5 -- Penalizar caminhos não claros
+			end
+			
+			if score < bestScore then
+				bestScore = score
+				bestModel = modelData
+			end
+		end
+	end
+	
+	return bestModel
+end
+
+-- Função para coletar modelo atual
+local function collectCurrentModel()
+	if not currentModel or not modelExists(currentModel) then
+		return false
+	end
+	
+	-- Olhar para o modelo
+	lookAtModel(currentModel.part.Position)
+	
+	-- Clicar para coletar
+	autoClick()
+	
+	-- Verificar se ainda está perto o suficiente
+	if character and humanoidRootPart and currentModel.part then
+		local distance = (currentModel.part.Position - humanoidRootPart.Position).Magnitude
+		if distance < 10 then
+			statusLabel.Text = "Status: Coletando..."
+			statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+			return true
+		end
+	end
+	
+	return false
+end
+
+-- Função para cancelar movimento atual
+local function cancelCurrentMovement()
+	if currentTween then
+		currentTween:Cancel()
+		currentTween = nil
+	end
+end
+
+-- Função principal
+local function humbugLoop()
+	local lastModelCheck = 0
+	local isMoving = false
+	
+	while humbugEnabled do
+		local currentTime = tick()
+		
+		-- Atualizar character reference
+		character = player.Character
+		if character then
+			humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+			humanoid = character:FindFirstChildOfClass("Humanoid")
+		end
+		
+		-- Verificar se precisamos encontrar um novo modelo
+		if not currentModel or not modelExists(currentModel) or (currentTime - lastModelCheck) > checkInterval then
+			lastModelCheck = currentTime
+			cancelCurrentMovement()
+			
+			local newModel = findBestModel()
+			if newModel then
+				currentModel = newModel
+				
+				-- Calcular posição acima do modelo para coleta
+				local targetHeight = currentModel.part.Position.Y + 5
+				local targetPos = Vector3.new(
+					currentModel.part.Position.X,
+					targetHeight,
+					currentModel.part.Position.Z
+				)
+				
+				-- Encontrar caminho inteligente
+				if character and humanoidRootPart then
+					local startPos = humanoidRootPart.Position
+					local pathPoints = findSmartPath(startPos, targetPos)
+					
+					if #pathPoints > 0 then
+						statusLabel.Text = "Status: Indo para modelo (Caminho: " .. #pathPoints .. " pontos)"
+						statusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+						
+						-- Iniciar movimento
+						isMoving = moveToPosition(pathPoints)
+					else
+						statusLabel.Text = "Status: Sem caminho para modelo"
+						statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+					end
+				end
+			else
+				statusLabel.Text = "Status: Nenhum modelo encontrado"
+				statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+				task.wait(1)
+				continue
+			end
+		end
+		
+		-- Se temos um modelo válido e não estamos nos movendo
+		if currentModel and modelExists(currentModel) and not isMoving then
+			-- Verificar distância atual
+			if character and humanoidRootPart then
+				local distance = (currentModel.part.Position - humanoidRootPart.Position).Magnitude
+				
+				if distance < 15 then
+					-- Próximo o suficiente para coletar
+					collectCurrentModel()
+				else
+					-- Muito longe, precisamos nos mover novamente
+					lastModelCheck = 0 -- Forçar nova busca de caminho
+				end
+			end
+		end
+		
+		task.wait(0.1)
+	end
+	
+	-- Cancelar movimento ao parar
+	cancelCurrentMovement()
+	currentModel = nil
+end
+
+-- Botão de fechar
+closeButton.MouseButton1Click:Connect(function()
+	humbugEnabled = false
+	cancelCurrentMovement()
+	currentModel = nil
+	screenGui:Destroy()
+end)
+
+-- Botão de toggle
+toggleButton.MouseButton1Click:Connect(function()
+	humbugEnabled = not humbugEnabled
+	
+	if humbugEnabled then
+		toggleButton.Text = "Desligar Modo Humbug"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+		statusLabel.Text = "Status: Ligado"
+		statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+		
+		-- Iniciar loop
+		task.spawn(humbugLoop)
+	else
+		toggleButton.Text = "Ligar Modo Humbug"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+		statusLabel.Text = "Status: Desligado"
+		statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+		cancelCurrentMovement()
+	end
+end)
+
+-- Atualizar character quando respawnar
+player.CharacterAdded:Connect(function(newCharacter)
+	character = newCharacter
+	humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+	humanoid = character:WaitForChild("Humanoid")
+	
+	-- Cancelar movimento se o character mudou
+	if humbugEnabled then
+		cancelCurrentMovement()
+	end
+end)
