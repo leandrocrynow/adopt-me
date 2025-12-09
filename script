@@ -20,16 +20,17 @@ screenGui.ResetOnSpawn = false
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 250, 0, 150)
-frame.Position = UDim2.new(0.5, -125, 0.5, -75)
+frame.Size = UDim2.new(0.15, 0, 0.25, 0)
+frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+frame.AnchorPoint = Vector2.new(0.5, 0.5)
 frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 frame.BorderSizePixel = 2
 frame.BorderColor3 = Color3.fromRGB(255, 255, 255)
 frame.Parent = screenGui
 
 local closeButton = Instance.new("TextButton")
-closeButton.Size = UDim2.new(0, 30, 0, 30)
-closeButton.Position = UDim2.new(1, -35, 0, 5)
+closeButton.Size = UDim2.new(0.12, 0, 0.2, 0)
+closeButton.Position = UDim2.new(0.88, 0, 0.03, 0)
 closeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
 closeButton.Text = "X"
 closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -42,32 +43,33 @@ cornerClose.CornerRadius = UDim.new(0, 4)
 cornerClose.Parent = closeButton
 
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 40)
+title.Size = UDim2.new(1, 0, 0.27, 0)
+title.Position = UDim2.new(0, 0, 0, 0)
 title.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 title.Text = "Humbug Auto Collector"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 18
+title.TextScaled = true
 title.Font = Enum.Font.GothamBold
 title.Parent = frame
 
 local statusLabel = Instance.new("TextLabel")
-statusLabel.Size = UDim2.new(1, -20, 0, 30)
-statusLabel.Position = UDim2.new(0, 10, 0, 50)
+statusLabel.Size = UDim2.new(0.92, 0, 0.2, 0)
+statusLabel.Position = UDim2.new(0.04, 0, 0.33, 0)
 statusLabel.BackgroundTransparency = 1
 statusLabel.Text = "Status: Desligado"
 statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-statusLabel.TextSize = 14
+statusLabel.TextScaled = true
 statusLabel.Font = Enum.Font.Gotham
 statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 statusLabel.Parent = frame
 
 local toggleButton = Instance.new("TextButton")
-toggleButton.Size = UDim2.new(0, 200, 0, 40)
-toggleButton.Position = UDim2.new(0.5, -100, 1, -50)
+toggleButton.Size = UDim2.new(0.8, 0, 0.27, 0)
+toggleButton.Position = UDim2.new(0.1, 0, 0.67, 0)
 toggleButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
 toggleButton.Text = "Ligar Modo Humbug"
 toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleButton.TextSize = 16
+toggleButton.TextScaled = true
 toggleButton.Font = Enum.Font.GothamBold
 toggleButton.Parent = frame
 
