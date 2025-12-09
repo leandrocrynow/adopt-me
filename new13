@@ -1,0 +1,621 @@
+-- Serviços
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
+
+-- Variáveis
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+local humbugEnabled = false
+local currentModel = nil
+local checkInterval = 1
+local clickDelay = 0.15
+local teleportAttempts = 0
+local mode = "Ativo" -- "Ativo" ou "Passivo"
+local persistenceLevel = 5 -- Nível de persistência (1-10)
+local maxStuckTime = 3 -- Tempo máximo preso em segundos
+local lastSuccessfulPosition = humanoidRootPart.Position
+
+-- Cache para modelos
+local modelCache = {}
+local lastCacheUpdate = 0
+local cacheUpdateInterval = 1
+
+-- Criar UI avançada
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HumbugProUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = CoreGui
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0.22, 0, 0.4, 0)
+mainFrame.Position = UDim2.new(0.02, 0, 0.3, 0)
+mainFrame.AnchorPoint = Vector2.new(0, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+mainFrame.BorderSizePixel = 0
+mainFrame.BackgroundTransparency = 0.05
+mainFrame.Parent = screenGui
+
+-- Background com efeito
+local bgGradient = Instance.new("UIGradient")
+bgGradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 35, 50)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 20, 30))
+}
+bgGradient.Rotation = 135
+bgGradient.Parent = mainFrame
+
+-- Header
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, 0, 0.12, 0)
+header.Position = UDim2.new(0, 0, 0, 0)
+header.BackgroundColor3 = Color3.fromRGB(10, 15, 25)
+header.BorderSizePixel = 0
+header.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(0.8, 0, 1, 0)
+title.Position = UDim2.new(0.1, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "⚡ HUMBUG PRO"
+title.TextColor3 = Color3.fromRGB(255, 220, 100)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBlack
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = header
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0.12, 0, 0.8, 0)
+closeButton.Position = UDim2.new(0.88, 0, 0.1, 0)
+closeButton.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+closeButton.Text = "✕"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 16
+closeButton.Font = Enum.Font.GothamBold
+closeButton.Parent = header
+
+-- Status area
+local statusContainer = Instance.new("Frame")
+statusContainer.Size = UDim2.new(0.9, 0, 0.15, 0)
+statusContainer.Position = UDim2.new(0.05, 0, 0.15, 0)
+statusContainer.BackgroundColor3 = Color3.fromRGB(30, 40, 55)
+statusContainer.BorderSizePixel = 0
+statusContainer.Parent = mainFrame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, 0, 1, 0)
+statusLabel.Position = UDim2.new(0, 0, 0, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "🛑 DESLIGADO"
+statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+statusLabel.TextScaled = true
+statusLabel.Font = Enum.Font.GothamBold
+statusLabel.Parent = statusContainer
+
+-- Stats area
+local statsContainer = Instance.new("Frame")
+statsContainer.Size = UDim2.new(0.9, 0, 0.15, 0)
+statsContainer.Position = UDim2.new(0.05, 0, 0.32, 0)
+statsContainer.BackgroundColor3 = Color3.fromRGB(35, 45, 65)
+statsContainer.BorderSizePixel = 0
+statsContainer.Parent = mainFrame
+
+local statsLabel = Instance.new("TextLabel")
+statsLabel.Size = UDim2.new(1, 0, 1, 0)
+statsLabel.Position = UDim2.new(0, 0, 0, 0)
+statsLabel.BackgroundTransparency = 1
+statsLabel.Text = "Tentativas: 0 | Modo: Ativo"
+statsLabel.TextColor3 = Color3.fromRGB(150, 200, 255)
+statsLabel.TextScaled = true
+statsLabel.Font = Enum.Font.Gotham
+statsLabel.Parent = statsContainer
+
+-- Control buttons
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0.9, 0, 0.12, 0)
+toggleButton.Position = UDim2.new(0.05, 0, 0.5, 0)
+toggleButton.BackgroundColor3 = Color3.fromRGB(220, 80, 80)
+toggleButton.Text = "🎮 INICIAR COLETA"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.TextScaled = true
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Parent = mainFrame
+
+local modeButton = Instance.new("TextButton")
+modeButton.Size = UDim2.new(0.43, 0, 0.1, 0)
+modeButton.Position = UDim2.new(0.05, 0, 0.65, 0)
+modeButton.BackgroundColor3 = Color3.fromRGB(70, 120, 180)
+modeButton.Text = "MODO: ATIVO"
+modeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+modeButton.TextSize = 12
+modeButton.Font = Enum.Font.Gotham
+modeButton.Parent = mainFrame
+
+local persistenceButton = Instance.new("TextButton")
+persistenceButton.Size = UDim2.new(0.43, 0, 0.1, 0)
+persistenceButton.Position = UDim2.new(0.52, 0, 0.65, 0)
+persistenceButton.BackgroundColor3 = Color3.fromRGB(90, 160, 90)
+persistenceButton.Text = "PERSISTÊNCIA: " .. persistenceLevel
+persistenceButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+persistenceButton.TextSize = 11
+persistenceButton.Font = Enum.Font.Gotham
+persistenceButton.Parent = mainFrame
+
+local speedButton = Instance.new("TextButton")
+speedButton.Size = UDim2.new(0.43, 0, 0.1, 0)
+speedButton.Position = UDim2.new(0.05, 0, 0.78, 0)
+speedButton.BackgroundColor3 = Color3.fromRGB(160, 100, 180)
+speedButton.Text = "VELOCIDADE: NORMAL"
+speedButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedButton.TextSize = 11
+speedButton.Font = Enum.Font.Gotham
+speedButton.Parent = mainFrame
+
+local aggressiveButton = Instance.new("TextButton")
+aggressiveButton.Size = UDim2.new(0.43, 0, 0.1, 0)
+aggressiveButton.Position = UDim2.new(0.52, 0, 0.78, 0)
+aggressiveButton.BackgroundColor3 = Color3.fromRGB(180, 100, 80)
+aggressiveButton.Text = "AGGRESSIVE: OFF"
+aggressiveButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+aggressiveButton.TextSize = 11
+aggressiveButton.Font = Enum.Font.Gotham
+aggressiveButton.Parent = mainFrame
+
+-- Aplicar cantos arredondados
+local function applyCorner(frame)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = frame
+end
+
+applyCorner(mainFrame)
+applyCorner(header)
+applyCorner(statusContainer)
+applyCorner(statsContainer)
+applyCorner(toggleButton)
+applyCorner(modeButton)
+applyCorner(persistenceButton)
+applyCorner(speedButton)
+applyCorner(aggressiveButton)
+applyCorner(closeButton)
+
+-- Tornar UI arrastável
+local dragging = false
+local dragInput, mousePos, framePos
+
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        mousePos = input.Position
+        framePos = mainFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+mainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if dragging and dragInput then
+        local delta = dragInput.Position - mousePos
+        mainFrame.Position = UDim2.new(
+            framePos.X.Scale,
+            framePos.X.Offset + delta.X,
+            framePos.Y.Scale,
+            framePos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- Sistema de cliques avançado
+local function aggressiveClick()
+    local screenSize = workspace.CurrentCamera.ViewportSize
+    
+    -- Múltiplos cliques em posições diferentes
+    for i = 1, math.floor(persistenceLevel / 2) + 1 do
+        local x = math.random(screenSize.X * 0.3, screenSize.X * 0.7)
+        local y = math.random(screenSize.Y * 0.3, screenSize.Y * 0.7)
+        
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+        task.wait(0.01)
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+        task.wait(0.02)
+    end
+end
+
+local function smartClick()
+    if persistenceLevel >= 7 then
+        aggressiveClick()
+    else
+        local screenSize = workspace.CurrentCamera.ViewportSize
+        local x = screenSize.X / 2
+        local y = screenSize.Y / 2
+        
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+        task.wait(0.02)
+        VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    end
+end
+
+-- Sistema de cache para modelos
+local function updateModelCache()
+    local currentTime = tick()
+    if currentTime - lastCacheUpdate < cacheUpdateInterval then
+        return modelCache
+    end
+    
+    lastCacheUpdate = currentTime
+    modelCache = {}
+    
+    local humbugFolder = Workspace:FindFirstChild("HumbugWorkspace")
+    if not humbugFolder then return {} end
+    
+    for _, descendant in ipairs(humbugFolder:GetDescendants()) do
+        if descendant:IsA("Model") and descendant.Name == "PetModel" then
+            local targetPart = descendant.PrimaryPart or descendant:FindFirstChildWhichIsA("BasePart", true)
+            if targetPart then
+                table.insert(modelCache, {
+                    model = descendant,
+                    part = targetPart,
+                    position = targetPart.Position,
+                    lastSeen = currentTime
+                })
+            end
+        end
+    end
+    
+    return modelCache
+end
+
+-- Encontrar melhor modelo
+local function findBestModel()
+    local models = updateModelCache()
+    if #models == 0 then return nil end
+    
+    local bestModel = nil
+    local bestScore = -math.huge
+    
+    for _, modelData in ipairs(models) do
+        if modelData.model and modelData.model.Parent and modelData.part and modelData.part.Parent then
+            local distance = (modelData.position - humanoidRootPart.Position).Magnitude
+            
+            -- Score baseado em múltiplos fatores
+            local score = 0
+            
+            if mode == "Ativo" then
+                -- No modo ativo, preferir modelos mais próximos
+                score = 1000 / (distance + 1)
+            else
+                -- No modo passivo, preferir modelos que já estão vindo na nossa direção
+                score = 500 / (distance + 1)
+            end
+            
+            -- Bônus para modelos novos
+            local age = tick() - modelData.lastSeen
+            if age < 5 then
+                score = score * 1.5
+            end
+            
+            if score > bestScore then
+                bestScore = score
+                bestModel = modelData
+            end
+        end
+    end
+    
+    return bestModel
+end
+
+-- Sistema de teleporte persistente
+local function persistentTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    
+    local success = false
+    local attempts = persistenceLevel * 2
+    
+    for attempt = 1, attempts do
+        -- Método 1: Teleporte direto
+        humanoidRootPart.CFrame = CFrame.new(targetPos)
+        task.wait(0.05)
+        
+        -- Método 2: Teleporte com offset
+        local offset = Vector3.new(
+            math.random(-persistenceLevel, persistenceLevel) * 0.1,
+            math.random(3, 5 + persistenceLevel),
+            math.random(-persistenceLevel, persistenceLevel) * 0.1
+        )
+        humanoidRootPart.CFrame = CFrame.new(targetPos + offset)
+        task.wait(0.03)
+        
+        -- Método 3: Teleporte com rotação
+        local angle = math.rad(math.random(0, 360))
+        humanoidRootPart.CFrame = CFrame.new(targetPos) * CFrame.Angles(0, angle, 0)
+        task.wait(0.02)
+        
+        -- Verificar se estamos perto
+        local currentPos = humanoidRootPart.Position
+        local distance = (targetPos - currentPos).Magnitude
+        
+        if distance < (5 + persistenceLevel) then
+            success = true
+            lastSuccessfulPosition = currentPos
+            break
+        end
+        
+        -- Se estivermos muito presos, tentar métodos agressivos
+        if attempt > attempts / 2 then
+            -- Resetar estados
+            if humanoid then
+                pcall(function()
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                    task.wait(0.1)
+                    humanoid:ChangeState(Enum.HumanoidStateType.Running)
+                end)
+            end
+        end
+    end
+    
+    return success
+end
+
+-- Modo Ativo: Player vai até o modelo
+local function activeMode()
+    if not currentModel or not currentModel.model or not currentModel.model.Parent then
+        return false
+    end
+    
+    local modelPos = currentModel.position
+    local targetPos = modelPos + Vector3.new(0, 3 + persistenceLevel, 0)
+    
+    statusLabel.Text = "🎯 PERSEGUINDO MODELO"
+    statusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+    
+    -- Teleportar persistentemente
+    local teleported = persistentTeleport(targetPos)
+    
+    if teleported then
+        -- Olhar para o modelo
+        local lookDir = (modelPos - humanoidRootPart.Position)
+        if lookDir.Magnitude > 0 then
+            lookDir = Vector3.new(lookDir.X, 0, lookDir.Z).Unit
+            humanoidRootPart.CFrame = CFrame.new(humanoidRootPart.Position, humanoidRootPart.Position + lookDir)
+        end
+        
+        -- Clicar agressivamente
+        smartClick()
+        
+        teleportAttempts = teleportAttempts + 1
+        statsLabel.Text = "Tentativas: " .. teleportAttempts .. " | Modo: Ativo"
+        
+        return true
+    end
+    
+    return false
+end
+
+-- Modo Passivo: Atrair modelos para o player
+local function passiveMode()
+    statusLabel.Text = "🧲 ATRAINDO MODELOS"
+    statusLabel.TextColor3 = Color3.fromRGB(180, 100, 255)
+    
+    -- Ficar em uma posição fixa ou se mover pouco
+    local stayPos = lastSuccessfulPosition
+    
+    -- Pequeno movimento para atrair atenção
+    if math.random(1, 10) <= 3 then
+        local offset = Vector3.new(
+            math.random(-2, 2),
+            0,
+            math.random(-2, 2)
+        )
+        humanoidRootPart.CFrame = CFrame.new(stayPos + offset)
+    end
+    
+    -- Clicar repetidamente para atrair modelos
+    for i = 1, persistenceLevel * 2 do
+        smartClick()
+        task.wait(0.1)
+    end
+    
+    -- Verificar se algum modelo chegou perto
+    local models = updateModelCache()
+    for _, modelData in ipairs(models) do
+        if modelData.model and modelData.model.Parent then
+            local distance = (modelData.position - humanoidRootPart.Position).Magnitude
+            if distance < 10 then
+                -- Modelo chegou perto, clicar nele
+                smartClick()
+                teleportAttempts = teleportAttempts + 1
+                statsLabel.Text = "Tentativas: " .. teleportAttempts .. " | Modo: Passivo"
+                return true
+            end
+        end
+    end
+    
+    return false
+end
+
+-- Loop principal ultra-persistente
+local function humbugLoop()
+    local lastModelChange = tick()
+    local stuckStartTime = nil
+    local sameModelCount = 0
+    
+    while humbugEnabled do
+        -- Atualizar referências
+        character = player.Character
+        if character then
+            humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+            humanoid = character:FindFirstChild("Humanoid")
+        end
+        
+        if not character or not humanoidRootPart then
+            statusLabel.Text = "⏳ AGUARDANDO CHARACTER"
+            task.wait(1)
+            continue
+        end
+        
+        -- Encontrar melhor modelo
+        local bestModel = findBestModel()
+        
+        if not bestModel then
+            statusLabel.Text = "🔍 PROCURANDO MODELOS..."
+            statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+            task.wait(1)
+            continue
+        end
+        
+        -- Verificar se estamos presos no mesmo modelo
+        if currentModel and bestModel.model == currentModel.model then
+            sameModelCount = sameModelCount + 1
+            
+            if not stuckStartTime then
+                stuckStartTime = tick()
+            elseif tick() - stuckStartTime > maxStuckTime then
+                -- Estamos presos, forçar troca de modelo
+                statusLabel.Text = "🔄 TROCANDO MODELO (PRESO)"
+                currentModel = nil
+                stuckStartTime = nil
+                sameModelCount = 0
+                task.wait(0.5)
+                continue
+            end
+        else
+            currentModel = bestModel
+            stuckStartTime = nil
+            sameModelCount = 0
+            lastModelChange = tick()
+        end
+        
+        -- Executar modo selecionado
+        local success
+        if mode == "Ativo" then
+            success = activeMode()
+        else
+            success = passiveMode()
+        end
+        
+        -- Atualizar stats
+        statsLabel.Text = "Tentativas: " .. teleportAttempts .. " | Modo: " .. mode
+        
+        -- Pequena pausa baseada na persistência
+        local waitTime = 0.3 / (persistenceLevel * 0.5)
+        task.wait(math.max(0.1, waitTime))
+    end
+end
+
+-- Botões de controle
+closeButton.MouseButton1Click:Connect(function()
+    humbugEnabled = false
+    screenGui:Destroy()
+end)
+
+toggleButton.MouseButton1Click:Connect(function()
+    humbugEnabled = not humbugEnabled
+    
+    if humbugEnabled then
+        toggleButton.Text = "🛑 PARAR COLETA"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(80, 200, 80)
+        statusLabel.Text = "✅ COLETANDO..."
+        statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+        
+        -- Resetar stats
+        teleportAttempts = 0
+        currentModel = nil
+        lastSuccessfulPosition = humanoidRootPart.Position
+        
+        -- Iniciar loop
+        task.spawn(humbugLoop)
+    else
+        toggleButton.Text = "🎮 INICIAR COLETA"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(220, 80, 80)
+        statusLabel.Text = "🛑 DESLIGADO"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+end)
+
+modeButton.MouseButton1Click:Connect(function()
+    if mode == "Ativo" then
+        mode = "Passivo"
+        modeButton.Text = "MODO: PASSIVO"
+        modeButton.BackgroundColor3 = Color3.fromRGB(180, 100, 255)
+    else
+        mode = "Ativo"
+        modeButton.Text = "MODO: ATIVO"
+        modeButton.BackgroundColor3 = Color3.fromRGB(70, 120, 180)
+    end
+    statsLabel.Text = "Tentativas: " .. teleportAttempts .. " | Modo: " .. mode
+end)
+
+persistenceButton.MouseButton1Click:Connect(function()
+    persistenceLevel = persistenceLevel % 10 + 1
+    persistenceButton.Text = "PERSISTÊNCIA: " .. persistenceLevel
+    
+    -- Cor baseada no nível
+    local r = math.floor(90 + (persistenceLevel * 15))
+    local g = math.floor(160 - (persistenceLevel * 5))
+    local b = math.floor(90 + (persistenceLevel * 3))
+    persistenceButton.BackgroundColor3 = Color3.fromRGB(r, g, b)
+end)
+
+speedButton.MouseButton1Click:Connect(function()
+    if clickDelay == 0.15 then
+        clickDelay = 0.07
+        speedButton.Text = "VELOCIDADE: RÁPIDO"
+        speedButton.BackgroundColor3 = Color3.fromRGB(200, 120, 50)
+    elseif clickDelay == 0.07 then
+        clickDelay = 0.02
+        speedButton.Text = "VELOCIDADE: TURBO"
+        speedButton.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+    else
+        clickDelay = 0.15
+        speedButton.Text = "VELOCIDADE: NORMAL"
+        speedButton.BackgroundColor3 = Color3.fromRGB(160, 100, 180)
+    end
+end)
+
+aggressiveButton.MouseButton1Click:Connect(function()
+    if aggressiveButton.Text:find("OFF") then
+        aggressiveButton.Text = "AGGRESSIVE: ON"
+        aggressiveButton.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+        persistenceLevel = math.min(10, persistenceLevel + 2)
+        persistenceButton.Text = "PERSISTÊNCIA: " .. persistenceLevel
+    else
+        aggressiveButton.Text = "AGGRESSIVE: OFF"
+        aggressiveButton.BackgroundColor3 = Color3.fromRGB(180, 100, 80)
+    end
+end)
+
+-- Atualizar character
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+    humanoid = character:WaitForChild("Humanoid")
+    
+    if humbugEnabled then
+        lastSuccessfulPosition = humanoidRootPart.Position
+    end
+end)
+
+-- Notificação inicial
+task.spawn(function()
+    task.wait(2)
+    print("=== HUMBUG PRO CARREGADO ===")
+    print("Modos disponíveis: Ativo (player vai até modelos) e Passivo (modelos vêm até player)")
+    print("Use a UI para controlar todas as configurações!")
+end)
