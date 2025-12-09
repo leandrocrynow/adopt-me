@@ -1,0 +1,398 @@
+-- Serviços
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local UserInputService = game:GetService("UserInputService")
+
+-- Variáveis
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+local humbugEnabled = false
+local currentModel = nil
+local checkInterval = 3 -- Intervalo para verificar (em segundos)
+local clickDelay = 0.5 -- Delay entre cliques
+local navigationSpeed = 1 -- Velocidade de navegação
+
+-- Criar UI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HumbugUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0.15, 0, 0.25, 0)
+frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+frame.AnchorPoint = Vector2.new(0.5, 0.5)
+frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+frame.BorderSizePixel = 2
+frame.BorderColor3 = Color3.fromRGB(255, 255, 255)
+frame.Parent = screenGui
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0.12, 0, 0.2, 0)
+closeButton.Position = UDim2.new(0.88, 0, 0.03, 0)
+closeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 18
+closeButton.Font = Enum.Font.GothamBold
+closeButton.Parent = frame
+
+local cornerClose = Instance.new("UICorner")
+cornerClose.CornerRadius = UDim.new(0, 4)
+cornerClose.Parent = closeButton
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0.27, 0)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+title.Text = "Humbug Auto Collector"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.Parent = frame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0.92, 0, 0.2, 0)
+statusLabel.Position = UDim2.new(0.04, 0, 0.33, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: Desligado"
+statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+statusLabel.TextScaled = true
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = frame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0.8, 0, 0.27, 0)
+toggleButton.Position = UDim2.new(0.1, 0, 0.67, 0)
+toggleButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+toggleButton.Text = "Ligar Modo Humbug"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.TextScaled = true
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Parent = frame
+
+-- Tornar a UI arrastável
+local dragging = false
+local dragInput, mousePos, framePos
+
+frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		mousePos = input.Position
+		framePos = frame.Position
+		
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+frame.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		dragInput = input
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	if dragging and dragInput then
+		local delta = dragInput.Position - mousePos
+		frame.Position = UDim2.new(
+			framePos.X.Scale,
+			framePos.X.Offset + delta.X,
+			framePos.Y.Scale,
+			framePos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+-- Função para clicar na tela
+local function autoClick()
+	local screenSize = workspace.CurrentCamera.ViewportSize
+	local x = screenSize.X / 2
+	local y = screenSize.Y / 2
+	
+	VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+	task.wait(0.01)
+	VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+end
+
+-- Função para verificar se o modelo ainda existe
+local function modelExists(modelData)
+	if not modelData then return false end
+	local model = modelData.model
+	local part = modelData.part
+	return model and model.Parent and part and part.Parent
+end
+
+-- Função para simular teclas de movimento
+local function simulateKeyPress(keyCode, isPressed)
+	VirtualInputManager:SendKeyEvent(isPressed, keyCode, false, game)
+end
+
+-- Função para mover o player usando WASD
+local function navigateToPosition(targetPosition)
+	if not character or not humanoidRootPart then
+		return false
+	end
+	
+	local currentPosition = humanoidRootPart.Position
+	local direction = (targetPosition - currentPosition)
+	direction = Vector3.new(direction.X, 0, direction.Z) -- Ignorar altura
+	
+	local distance = direction.Magnitude
+	
+	if distance < 10 then -- Se está perto o suficiente
+		return true
+	end
+	
+	direction = direction.Unit
+	
+	-- Determinar qual tecla pressionar baseado na direção
+	local forward = workspace.CurrentCamera.CFrame.LookVector
+	local right = workspace.CurrentCamera.CFrame.RightVector
+	
+	local dotForward = direction:Dot(forward)
+	local dotRight = direction:Dot(right)
+	
+	-- Liberar todas as teclas primeiro
+	simulateKeyPress(Enum.KeyCode.W, false)
+	simulateKeyPress(Enum.KeyCode.A, false)
+	simulateKeyPress(Enum.KeyCode.S, false)
+	simulateKeyPress(Enum.KeyCode.D, false)
+	
+	-- Pressionar teclas apropriadas
+	if math.abs(dotForward) > math.abs(dotRight) then
+		if dotForward > 0.3 then
+			simulateKeyPress(Enum.KeyCode.W, true)
+			statusLabel.Text = "Status: Andando para frente"
+		elseif dotForward < -0.3 then
+			simulateKeyPress(Enum.KeyCode.S, true)
+			statusLabel.Text = "Status: Andando para trás"
+		end
+	else
+		if dotRight > 0.3 then
+			simulateKeyPress(Enum.KeyCode.D, true)
+			statusLabel.Text = "Status: Andando para direita"
+		elseif dotRight < -0.3 then
+			simulateKeyPress(Enum.KeyCode.A, true)
+			statusLabel.Text = "Status: Andando para esquerda"
+		end
+	end
+	
+	-- Pular se estiver muito longe
+	if distance > 50 then
+		simulateKeyPress(Enum.KeyCode.Space, true)
+		task.wait(0.1)
+		simulateKeyPress(Enum.KeyCode.Space, false)
+	end
+	
+	return false
+end
+
+-- Função para olhar para o modelo
+local function lookAtModel(targetPosition)
+	if not character or not humanoidRootPart then
+		return
+	end
+	
+	local currentPosition = humanoidRootPart.Position
+	local direction = (targetPosition - currentPosition).Unit
+	
+	-- Calcular rotação para olhar para o modelo
+	local lookVector = Vector3.new(direction.X, 0, direction.Z)
+	if lookVector.Magnitude > 0 then
+		humanoidRootPart.CFrame = CFrame.new(currentPosition, currentPosition + lookVector)
+	end
+end
+
+-- Função para obter modelos da pasta HumbugWorkspace
+local function getHumbugModels()
+	local workspace = game:GetService("Workspace")
+	local humbugFolder = workspace:FindFirstChild("HumbugWorkspace")
+	
+	if not humbugFolder then
+		return nil
+	end
+	
+	local models = {}
+	for _, descendant in ipairs(humbugFolder:GetDescendants()) do
+		if descendant:IsA("Model") and descendant.Name == "PetModel" then
+			-- Pegar qualquer parte do modelo
+			local targetPart = descendant.PrimaryPart or descendant:FindFirstChildWhichIsA("BasePart", true)
+			if targetPart then
+				table.insert(models, {model = descendant, part = targetPart})
+			end
+		end
+	end
+	
+	return models
+end
+
+-- Função para encontrar o modelo mais próximo
+local function findClosestModel()
+	local models = getHumbugModels()
+	if not models or #models == 0 then
+		return nil
+	end
+	
+	if not character or not humanoidRootPart then
+		return models[1]
+	end
+	
+	local currentPosition = humanoidRootPart.Position
+	local closestModel = nil
+	local closestDistance = math.huge
+	
+	for _, modelData in ipairs(models) do
+		if modelData.part and modelData.part.Parent then
+			local distance = (modelData.part.Position - currentPosition).Magnitude
+			if distance < closestDistance then
+				closestDistance = distance
+				closestModel = modelData
+			end
+		end
+	end
+	
+	return closestModel
+end
+
+-- Função para coletar modelo atual
+local function collectCurrentModel()
+	if not currentModel or not modelExists(currentModel) then
+		return false
+	end
+	
+	-- Olhar para o modelo
+	lookAtModel(currentModel.part.Position)
+	
+	-- Clicar para coletar
+	autoClick()
+	
+	-- Verificar se ainda está perto o suficiente
+	if character and humanoidRootPart and currentModel.part then
+		local distance = (currentModel.part.Position - humanoidRootPart.Position).Magnitude
+		if distance < 15 then
+			statusLabel.Text = "Status: Coletando..."
+			statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+			return true
+		end
+	end
+	
+	return false
+end
+
+-- Função principal
+local function humbugLoop()
+	local lastModelCheck = 0
+	local navigationAttempts = 0
+	local maxNavigationAttempts = 30 -- Tentar navegar por no máximo 30 iterações
+	
+	while humbugEnabled do
+		local currentTime = tick()
+		
+		-- Atualizar character reference
+		character = player.Character
+		if character then
+			humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+		end
+		
+		-- Verificar se precisamos encontrar um novo modelo
+		if not currentModel or not modelExists(currentModel) or (currentTime - lastModelCheck) > checkInterval then
+			lastModelCheck = currentTime
+			navigationAttempts = 0
+			
+			local newModel = findClosestModel()
+			if newModel then
+				currentModel = newModel
+				statusLabel.Text = "Status: Indo para modelo mais próximo"
+				statusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+			else
+				statusLabel.Text = "Status: Nenhum modelo encontrado"
+				statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+				task.wait(1)
+				continue
+			end
+		end
+		
+		-- Se temos um modelo válido
+		if currentModel and modelExists(currentModel) then
+			-- Navegar até o modelo
+			if character and humanoidRootPart then
+				local reached = navigateToPosition(currentModel.part.Position)
+				
+				if reached or navigationAttempts > maxNavigationAttempts then
+					-- Parar movimento
+					simulateKeyPress(Enum.KeyCode.W, false)
+					simulateKeyPress(Enum.KeyCode.A, false)
+					simulateKeyPress(Enum.KeyCode.S, false)
+					simulateKeyPress(Enum.KeyCode.D, false)
+					
+					-- Coletar
+					collectCurrentModel()
+					
+					-- Resetar tentativas se chegou
+					if reached then
+						navigationAttempts = 0
+					end
+				else
+					navigationAttempts = navigationAttempts + 1
+				end
+			end
+		else
+			-- Liberar teclas se não há modelo
+			simulateKeyPress(Enum.KeyCode.W, false)
+			simulateKeyPress(Enum.KeyCode.A, false)
+			simulateKeyPress(Enum.KeyCode.S, false)
+			simulateKeyPress(Enum.KeyCode.D, false)
+		end
+		
+		task.wait(0.1)
+	end
+	
+	-- Liberar todas as teclas ao parar
+	simulateKeyPress(Enum.KeyCode.W, false)
+	simulateKeyPress(Enum.KeyCode.A, false)
+	simulateKeyPress(Enum.KeyCode.S, false)
+	simulateKeyPress(Enum.KeyCode.D, false)
+	simulateKeyPress(Enum.KeyCode.Space, false)
+	currentModel = nil
+end
+
+-- Botão de fechar
+closeButton.MouseButton1Click:Connect(function()
+	humbugEnabled = false
+	currentModel = nil
+	screenGui:Destroy()
+end)
+
+-- Botão de toggle
+toggleButton.MouseButton1Click:Connect(function()
+	humbugEnabled = not humbugEnabled
+	
+	if humbugEnabled then
+		toggleButton.Text = "Desligar Modo Humbug"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+		statusLabel.Text = "Status: Ligado"
+		statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+		
+		-- Iniciar loop
+		task.spawn(humbugLoop)
+	else
+		toggleButton.Text = "Ligar Modo Humbug"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+		statusLabel.Text = "Status: Desligado"
+		statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+	end
+end)
+
+-- Atualizar character quando respawnar
+player.CharacterAdded:Connect(function(newCharacter)
+	character = newCharacter
+	humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+end)
