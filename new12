@@ -1,0 +1,596 @@
+-- Serviços
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+
+-- Variáveis
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+local humbugEnabled = false
+local currentModel = nil
+local checkInterval = 2
+local clickDelay = 0.2
+local currentMethod = 1 -- Método atual a ser testado
+local teleportAttempts = 0
+
+-- Lista de métodos disponíveis (tentaremos todos)
+local methods = {
+    "TeleportDirect",      -- 1: Teleporte direto
+    "CFrameSet",           -- 2: Setar CFrame diretamente
+    "TweenTeleport",       -- 3: Teleporte com Tween
+    "NetworkOwnership",    -- 4: Mudar network ownership + teleporte
+    "AnchorTeleport",      -- 5: Anchor + teleporte
+    "VelocityTeleport",    -- 6: Velocidade + teleporte
+    "HumanoidState",       -- 7: Mudar estado do humanoid
+    "NetworkReplicate",    -- 8: Usar network replicate
+    "CharacterState",      -- 9: Alterar estados do character
+    "PhysicsBypass"       -- 10: Bypass de física
+}
+
+-- Criar UI aprimorada
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HumbugUI"
+screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = CoreGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0.2, 0, 0.35, 0)
+frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+frame.AnchorPoint = Vector2.new(0.5, 0.5)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+frame.BorderSizePixel = 0
+frame.BackgroundTransparency = 0.1
+frame.Parent = screenGui
+
+local gradient = Instance.new("UIGradient")
+gradient.Color = ColorSequence.new{
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 40, 60)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 40))
+}
+gradient.Rotation = 45
+gradient.Parent = frame
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0.12, 0, 0.15, 0)
+closeButton.Position = UDim2.new(0.88, 0, 0.03, 0)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeButton.Text = "✕"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 16
+closeButton.Font = Enum.Font.GothamBold
+closeButton.Parent = frame
+
+local cornerClose = Instance.new("UICorner")
+cornerClose.CornerRadius = UDim.new(0, 8)
+cornerClose.Parent = closeButton
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0.15, 0)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(20, 20, 35)
+title.Text = "🔥 HUMBUG COLLECTOR"
+title.TextColor3 = Color3.fromRGB(255, 200, 100)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.Parent = frame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0.9, 0, 0.15, 0)
+statusLabel.Position = UDim2.new(0.05, 0, 0.2, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: Desligado"
+statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+statusLabel.TextScaled = true
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = frame
+
+local methodLabel = Instance.new("TextLabel")
+methodLabel.Size = UDim2.new(0.9, 0, 0.1, 0)
+methodLabel.Position = UDim2.new(0.05, 0, 0.4, 0)
+methodLabel.BackgroundTransparency = 1
+methodLabel.Text = "Método: Nenhum"
+methodLabel.TextColor3 = Color3.fromRGB(150, 150, 255)
+methodLabel.TextScaled = true
+methodLabel.Font = Enum.Font.Gotham
+methodLabel.TextXAlignment = Enum.TextXAlignment.Left
+methodLabel.Parent = frame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0.8, 0, 0.15, 0)
+toggleButton.Position = UDim2.new(0.1, 0, 0.55, 0)
+toggleButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+toggleButton.Text = "🎮 LIGAR HUMBUG"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.TextScaled = true
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Parent = frame
+
+local nextMethodButton = Instance.new("TextButton")
+nextMethodButton.Size = UDim2.new(0.35, 0, 0.1, 0)
+nextMethodButton.Position = UDim2.new(0.1, 0, 0.75, 0)
+nextMethodButton.BackgroundColor3 = Color3.fromRGB(80, 80, 180)
+nextMethodButton.Text = "Próximo Método"
+nextMethodButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+nextMethodButton.TextSize = 12
+nextMethodButton.Font = Enum.Font.Gotham
+nextMethodButton.Visible = false
+nextMethodButton.Parent = frame
+
+local autoSwitchCheck = Instance.new("TextButton")
+autoSwitchCheck.Size = UDim2.new(0.45, 0, 0.1, 0)
+autoSwitchCheck.Position = UDim2.new(0.5, 0, 0.75, 0)
+autoSwitchCheck.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
+autoSwitchCheck.Text = "Auto-Switch: ON"
+autoSwitchCheck.TextColor3 = Color3.fromRGB(255, 255, 255)
+autoSwitchCheck.TextSize = 12
+autoSwitchCheck.Font = Enum.Font.Gotham
+autoSwitchCheck.Visible = false
+autoSwitchCheck.Parent = frame
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = frame
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(100, 100, 200)
+UIStroke.Thickness = 2
+UIStroke.Parent = frame
+
+-- Tornar a UI arrastável
+local dragging = false
+local dragInput, mousePos, framePos
+
+local function updateDrag(input)
+    local delta = input.Position - mousePos
+    frame.Position = UDim2.new(
+        framePos.X.Scale,
+        framePos.X.Offset + delta.X,
+        framePos.Y.Scale,
+        framePos.Y.Offset + delta.Y
+    )
+end
+
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        mousePos = input.Position
+        framePos = frame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+frame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if dragging and dragInput then
+        updateDrag(dragInput)
+    end
+end)
+
+-- Função para clicar
+local function autoClick()
+    local screenSize = workspace.CurrentCamera.ViewportSize
+    local x = math.random(screenSize.X * 0.4, screenSize.X * 0.6)
+    local y = math.random(screenSize.Y * 0.4, screenSize.Y * 0.6)
+    
+    VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+    task.wait(0.02)
+    VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+    
+    -- Clicar múltiplas vezes
+    for i = 1, 2 do
+        task.wait(0.01)
+        VirtualInputManager:SendMouseButtonEvent(x + math.random(-5, 5), y + math.random(-5, 5), 0, true, game, 0)
+        task.wait(0.01)
+        VirtualInputManager:SendMouseButtonEvent(x + math.random(-5, 5), y + math.random(-5, 5), 0, false, game, 0)
+    end
+end
+
+-- Função para verificar modelo
+local function modelExists(modelData)
+    if not modelData then return false end
+    local model = modelData.model
+    local part = modelData.part
+    return model and model.Parent and part and part.Parent
+end
+
+-- MÉTODO 1: Teleporte direto simples
+local function teleportDirect(targetPos)
+    if not character or not humanoidRootPart then return false end
+    humanoidRootPart.CFrame = CFrame.new(targetPos)
+    return true
+end
+
+-- MÉTODO 2: Setar CFrame com orientação
+local function cframeSet(targetPos)
+    if not character or not humanoidRootPart then return false end
+    local lookDir = (targetPos - humanoidRootPart.Position)
+    if lookDir.Magnitude > 0 then
+        lookDir = lookDir.Unit
+        humanoidRootPart.CFrame = CFrame.new(targetPos, targetPos + lookDir)
+    else
+        humanoidRootPart.CFrame = CFrame.new(targetPos)
+    end
+    return true
+end
+
+-- MÉTODO 3: Teleporte com Tween
+local function tweenTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    
+    local tweenInfo = TweenInfo.new(
+        0.1,
+        Enum.EasingStyle.Linear,
+        Enum.EasingDirection.Out,
+        0,
+        false,
+        0
+    )
+    
+    local targetCFrame = CFrame.new(targetPos)
+    local tween = TweenService:Create(humanoidRootPart, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+    return true
+end
+
+-- MÉTODO 4: Network Ownership + Teleporte
+local function networkOwnershipTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    
+    -- Tentar pegar network ownership
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            pcall(function()
+                part:SetNetworkOwner(nil)
+                task.wait()
+                part:SetNetworkOwner(player)
+            end)
+        end
+    end
+    
+    task.wait(0.05)
+    humanoidRootPart.CFrame = CFrame.new(targetPos)
+    return true
+end
+
+-- MÉTODO 5: Anchor + Teleporte
+local function anchorTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    
+    local wasAnchored = humanoidRootPart.Anchored
+    humanoidRootPart.Anchored = true
+    humanoidRootPart.CFrame = CFrame.new(targetPos)
+    task.wait(0.1)
+    humanoidRootPart.Anchored = wasAnchored
+    return true
+end
+
+-- MÉTODO 6: Velocidade + Teleporte
+local function velocityTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    
+    local currentPos = humanoidRootPart.Position
+    local direction = (targetPos - currentPos)
+    local distance = direction.Magnitude
+    
+    if distance > 0 then
+        local velocity = direction.Unit * 100
+        humanoidRootPart.Velocity = velocity
+        task.wait(0.1)
+    end
+    
+    humanoidRootPart.CFrame = CFrame.new(targetPos)
+    humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+    return true
+end
+
+-- MÉTODO 7: Mudar estado do Humanoid
+local function humanoidStateTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    
+    if humanoid then
+        humanoid:ChangeState(Enum.HumanoidStateType.FallingDown)
+        task.wait(0.05)
+        humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+    end
+    
+    humanoidRootPart.CFrame = CFrame.new(targetPos)
+    return true
+end
+
+-- MÉTODO 8: Network Replicate
+local function networkReplicateTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    
+    -- Forçar replicação de rede
+    for i = 1, 3 do
+        humanoidRootPart.CFrame = CFrame.new(targetPos)
+        task.wait(0.03)
+    end
+    
+    -- Adicionar pequeno movimento
+    local smallOffset = Vector3.new(math.random(-1, 1), 0, math.random(-1, 1))
+    humanoidRootPart.CFrame = CFrame.new(targetPos + smallOffset)
+    task.wait(0.03)
+    humanoidRootPart.CFrame = CFrame.new(targetPos)
+    
+    return true
+end
+
+-- MÉTODO 9: Alterar estados do Character
+local function characterStateTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    
+    -- Desabilitar colisões temporariamente
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = false
+        end
+    end
+    
+    humanoidRootPart.CFrame = CFrame.new(targetPos)
+    
+    task.wait(0.1)
+    
+    -- Restaurar colisões
+    for _, part in pairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = true
+        end
+    end
+    
+    return true
+end
+
+-- MÉTODO 10: Bypass de física
+local function physicsBypassTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    
+    -- Multiplas tentativas com métodos diferentes
+    teleportDirect(targetPos)
+    task.wait(0.03)
+    cframeSet(targetPos)
+    task.wait(0.03)
+    networkReplicateTeleport(targetPos)
+    task.wait(0.03)
+    
+    -- Adicionar rotação aleatória
+    local randomCF = CFrame.new(targetPos) * CFrame.Angles(
+        0,
+        math.rad(math.random(0, 360)),
+        0
+    )
+    humanoidRootPart.CFrame = randomCF
+    
+    return true
+end
+
+-- Função para tentar teleportar com o método atual
+local function attemptTeleport(targetPos)
+    if not character or not humanoidRootPart then return false end
+    
+    methodLabel.Text = "Método: " .. methods[currentMethod]
+    
+    local success = false
+    
+    if currentMethod == 1 then
+        success = teleportDirect(targetPos)
+    elseif currentMethod == 2 then
+        success = cframeSet(targetPos)
+    elseif currentMethod == 3 then
+        success = tweenTeleport(targetPos)
+    elseif currentMethod == 4 then
+        success = networkOwnershipTeleport(targetPos)
+    elseif currentMethod == 5 then
+        success = anchorTeleport(targetPos)
+    elseif currentMethod == 6 then
+        success = velocityTeleport(targetPos)
+    elseif currentMethod == 7 then
+        success = humanoidStateTeleport(targetPos)
+    elseif currentMethod == 8 then
+        success = networkReplicateTeleport(targetPos)
+    elseif currentMethod == 9 then
+        success = characterStateTeleport(targetPos)
+    elseif currentMethod == 10 then
+        success = physicsBypassTeleport(targetPos)
+    end
+    
+    return success
+end
+
+-- Obter modelos
+local function getHumbugModels()
+    local workspace = game:GetService("Workspace")
+    local humbugFolder = workspace:FindFirstChild("HumbugWorkspace")
+    
+    if not humbugFolder then
+        return nil
+    end
+    
+    local models = {}
+    for _, descendant in ipairs(humbugFolder:GetDescendants()) do
+        if descendant:IsA("Model") and descendant.Name == "PetModel" then
+            local targetPart = descendant.PrimaryPart or descendant:FindFirstChildWhichIsA("BasePart", true)
+            if targetPart then
+                table.insert(models, {model = descendant, part = targetPart})
+            end
+        end
+    end
+    
+    return models
+end
+
+-- Loop principal
+local function humbugLoop()
+    local autoSwitch = false
+    
+    while humbugEnabled do
+        -- Atualizar referências
+        character = player.Character
+        if character then
+            humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        end
+        
+        if not character or not humanoidRootPart then
+            statusLabel.Text = "Status: Aguardando character..."
+            task.wait(1)
+            continue
+        end
+        
+        -- Obter modelos
+        local models = getHumbugModels()
+        
+        if not models or #models == 0 then
+            statusLabel.Text = "Status: Aguardando modelos..."
+            statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+            task.wait(1)
+            continue
+        end
+        
+        -- Escolher modelo mais próximo
+        local closestModel = nil
+        local closestDistance = math.huge
+        
+        for _, modelData in ipairs(models) do
+            if modelExists(modelData) then
+                local distance = (modelData.part.Position - humanoidRootPart.Position).Magnitude
+                if distance < closestDistance then
+                    closestDistance = distance
+                    closestModel = modelData
+                end
+            end
+        end
+        
+        if closestModel then
+            currentModel = closestModel
+            teleportAttempts = teleportAttempts + 1
+            
+            -- Posição acima do modelo
+            local targetPos = currentModel.part.Position + Vector3.new(0, 5, 0)
+            
+            -- Tentar teleportar
+            statusLabel.Text = "Status: Teleportando (Tentativa " .. teleportAttempts .. ")"
+            statusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+            
+            local teleported = attemptTeleport(targetPos)
+            
+            if teleported then
+                statusLabel.Text = "Status: Coletando..."
+                statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+                
+                -- Clicar repetidamente
+                for i = 1, 10 do
+                    if not humbugEnabled or not modelExists(currentModel) then
+                        break
+                    end
+                    autoClick()
+                    task.wait(clickDelay)
+                end
+                
+                -- Verificar se deve trocar de método automaticamente
+                if autoSwitch and teleportAttempts % 3 == 0 then
+                    currentMethod = currentMethod % #methods + 1
+                    methodLabel.Text = "Método: " .. methods[currentMethod] .. " (Auto)"
+                end
+            else
+                statusLabel.Text = "Status: Falha no teleporte"
+                statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+                
+                -- Se auto-switch estiver ligado, tentar próximo método
+                if autoSwitch then
+                    currentMethod = currentMethod % #methods + 1
+                    methodLabel.Text = "Método: " .. methods[currentMethod] .. " (Auto)"
+                end
+            end
+        else
+            statusLabel.Text = "Status: Nenhum modelo válido"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+            task.wait(1)
+        end
+        
+        task.wait(0.5)
+    end
+end
+
+-- Botão de fechar
+closeButton.MouseButton1Click:Connect(function()
+    humbugEnabled = false
+    screenGui:Destroy()
+end)
+
+-- Botão de toggle
+toggleButton.MouseButton1Click:Connect(function()
+    humbugEnabled = not humbugEnabled
+    
+    if humbugEnabled then
+        toggleButton.Text = "🛑 DESLIGAR HUMBUG"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+        statusLabel.Text = "Status: Ligado"
+        statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+        nextMethodButton.Visible = true
+        autoSwitchCheck.Visible = true
+        
+        -- Resetar tentativas
+        teleportAttempts = 0
+        currentMethod = 1
+        methodLabel.Text = "Método: " .. methods[currentMethod]
+        
+        -- Iniciar loop
+        task.spawn(humbugLoop)
+    else
+        toggleButton.Text = "🎮 LIGAR HUMBUG"
+        toggleButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+        statusLabel.Text = "Status: Desligado"
+        statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        nextMethodButton.Visible = false
+        autoSwitchCheck.Visible = false
+    end
+end)
+
+-- Botão para próximo método
+nextMethodButton.MouseButton1Click:Connect(function()
+    currentMethod = currentMethod % #methods + 1
+    methodLabel.Text = "Método: " .. methods[currentMethod]
+    teleportAttempts = 0
+end)
+
+-- Botão de auto-switch
+autoSwitchCheck.MouseButton1Click:Connect(function()
+    if autoSwitchCheck.Text:find("ON") then
+        autoSwitchCheck.Text = "Auto-Switch: OFF"
+        autoSwitchCheck.BackgroundColor3 = Color3.fromRGB(120, 60, 60)
+    else
+        autoSwitchCheck.Text = "Auto-Switch: ON"
+        autoSwitchCheck.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
+    end
+end)
+
+-- Atualizar character
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+end)
+
+-- Notificação inicial
+task.wait(1)
+print("=== HUMBUG COLLECTOR CARREGADO ===")
+print("Métodos disponíveis: " .. #methods)
+print("Pressione o botão na UI para começar!")
