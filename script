@@ -27,6 +27,20 @@ frame.BorderSizePixel = 2
 frame.BorderColor3 = Color3.fromRGB(255, 255, 255)
 frame.Parent = screenGui
 
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 30, 0, 30)
+closeButton.Position = UDim2.new(1, -35, 0, 5)
+closeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 18
+closeButton.Font = Enum.Font.GothamBold
+closeButton.Parent = frame
+
+local cornerClose = Instance.new("UICorner")
+cornerClose.CornerRadius = UDim.new(0, 4)
+cornerClose.Parent = closeButton
+
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 40)
 title.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
@@ -115,8 +129,12 @@ local function getHumbugModels()
 	
 	local models = {}
 	for _, descendant in ipairs(humbugFolder:GetDescendants()) do
-		if descendant:IsA("Model") and descendant.PrimaryPart then
-			table.insert(models, descendant)
+		if descendant:IsA("Model") and descendant.Name == "PetModel" then
+			-- Pegar qualquer parte do modelo para teleporte
+			local targetPart = descendant.PrimaryPart or descendant:FindFirstChildWhichIsA("BasePart", true)
+			if targetPart then
+				table.insert(models, {model = descendant, part = targetPart})
+			end
 		end
 	end
 	
@@ -138,11 +156,14 @@ local function humbugLoop()
 			task.wait(checkInterval)
 		else
 			-- Teleportar e coletar modelos
-			for i, model in ipairs(models) do
+			for i, modelData in ipairs(models) do
 				if not humbugEnabled then break end
 				
+				local model = modelData.model
+				local part = modelData.part
+				
 				-- Verificar se o modelo ainda existe
-				if model and model.Parent and model.PrimaryPart then
+				if model and model.Parent and part and part.Parent then
 					statusLabel.Text = "Status: Coletando (" .. i .. "/" .. #models .. ")"
 					statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
 					
@@ -151,7 +172,7 @@ local function humbugLoop()
 					if character then
 						humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
 						if humanoidRootPart then
-							humanoidRootPart.CFrame = model.PrimaryPart.CFrame
+							humanoidRootPart.CFrame = part.CFrame
 							
 							-- Clicar enquanto estiver no modelo
 							local startTime = tick()
@@ -175,6 +196,12 @@ local function humbugLoop()
 		end
 	end
 end
+
+-- Botão de fechar
+closeButton.MouseButton1Click:Connect(function()
+	humbugEnabled = false
+	screenGui:Destroy()
+end)
 
 -- Botão de toggle
 toggleButton.MouseButton1Click:Connect(function()
