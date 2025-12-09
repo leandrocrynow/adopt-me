@@ -1,0 +1,331 @@
+-- Serviços
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+-- Variáveis
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+local humbugEnabled = false
+local currentModel = nil
+local checkInterval = 2 -- Intervalo para verificar se modelo sumiu (em segundos)
+local clickDelay = 0.1 -- Delay entre cliques
+
+-- Criar UI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "HumbugUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0.15, 0, 0.25, 0)
+frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+frame.AnchorPoint = Vector2.new(0.5, 0.5)
+frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+frame.BorderSizePixel = 2
+frame.BorderColor3 = Color3.fromRGB(255, 255, 255)
+frame.Parent = screenGui
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0.12, 0, 0.2, 0)
+closeButton.Position = UDim2.new(0.88, 0, 0.03, 0)
+closeButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 18
+closeButton.Font = Enum.Font.GothamBold
+closeButton.Parent = frame
+
+local cornerClose = Instance.new("UICorner")
+cornerClose.CornerRadius = UDim.new(0, 4)
+cornerClose.Parent = closeButton
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0.27, 0)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+title.Text = "Humbug Auto Collector"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.Parent = frame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0.92, 0, 0.2, 0)
+statusLabel.Position = UDim2.new(0.04, 0, 0.33, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: Desligado"
+statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+statusLabel.TextScaled = true
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = frame
+
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0.8, 0, 0.27, 0)
+toggleButton.Position = UDim2.new(0.1, 0, 0.67, 0)
+toggleButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+toggleButton.Text = "Ligar Modo Humbug"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.TextScaled = true
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.Parent = frame
+
+-- Tornar a UI arrastável
+local dragging = false
+local dragInput, mousePos, framePos
+
+frame.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		mousePos = input.Position
+		framePos = frame.Position
+		
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+frame.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		dragInput = input
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	if dragging and dragInput then
+		local delta = dragInput.Position - mousePos
+		frame.Position = UDim2.new(
+			framePos.X.Scale,
+			framePos.X.Offset + delta.X,
+			framePos.Y.Scale,
+			framePos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+-- Função para clicar na tela
+local function autoClick()
+	local screenSize = workspace.CurrentCamera.ViewportSize
+	local x = screenSize.X / 2
+	local y = screenSize.Y / 2
+	
+	VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 0)
+	task.wait(0.01)
+	VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 0)
+end
+
+-- Função para verificar se o modelo ainda existe
+local function modelExists(modelData)
+	if not modelData then return false end
+	local model = modelData.model
+	local part = modelData.part
+	return model and model.Parent and part and part.Parent
+end
+
+-- Função para teleportar diretamente para cima do modelo
+local function teleportToModelTop(targetModel, targetPart)
+	character = player.Character
+	if not character then return false end
+	
+	humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then return false end
+	
+	if not modelExists({model = targetModel, part = targetPart}) then
+		return false
+	end
+	
+	-- Calcular posição acima do modelo
+	local modelPosition = targetPart.Position
+	local modelSize = targetModel:GetExtentsSize()
+	
+	-- Posicionar o player 5 unidades acima do centro do modelo
+	local teleportPosition = modelPosition + Vector3.new(0, 5, 0)
+	
+	-- Criar CFrame olhando para baixo (em direção ao modelo)
+	local lookAtModel = CFrame.lookAt(teleportPosition, modelPosition)
+	
+	humanoidRootPart.CFrame = lookAtModel
+	return true
+end
+
+-- Função para obter modelos da pasta HumbugWorkspace
+local function getHumbugModels()
+	local workspace = game:GetService("Workspace")
+	local humbugFolder = workspace:FindFirstChild("HumbugWorkspace")
+	
+	if not humbugFolder then
+		return nil
+	end
+	
+	local models = {}
+	for _, descendant in ipairs(humbugFolder:GetDescendants()) do
+		if descendant:IsA("Model") and descendant.Name == "PetModel" then
+			-- Pegar qualquer parte do modelo para teleporte
+			local targetPart = descendant.PrimaryPart or descendant:FindFirstChildWhichIsA("BasePart", true)
+			if targetPart then
+				table.insert(models, {model = descendant, part = targetPart})
+			end
+		end
+	end
+	
+	return models
+end
+
+-- Função para obter próximo modelo disponível (excluindo o atual)
+local function getNextModel(excludeModel)
+	local models = getHumbugModels()
+	if not models or #models == 0 then
+		return nil
+	end
+	
+	-- Se não há modelo para excluir, retornar o primeiro
+	if not excludeModel then
+		return models[1]
+	end
+	
+	-- Procurar próximo modelo que não seja o atual
+	for _, modelData in ipairs(models) do
+		if modelData.model ~= excludeModel.model then
+			return modelData
+		end
+	end
+	
+	-- Se só existe o modelo atual, retornar nil
+	return nil
+end
+
+-- Função principal de coleta
+local function humbugLoop()
+	local lastCheckTime = 0
+	local teleportCooldown = 0
+	
+	while humbugEnabled do
+		local currentTime = tick()
+		
+		-- Verificar se o modelo atual ainda existe
+		if currentModel then
+			if not modelExists(currentModel) then
+				-- Modelo sumiu, procurar próximo
+				statusLabel.Text = "Status: Modelo desapareceu, procurando próximo..."
+				statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+				
+				local nextModel = getNextModel(currentModel)
+				if nextModel then
+					currentModel = nextModel
+					teleportCooldown = 0 -- Resetar cooldown
+				else
+					currentModel = nil
+					statusLabel.Text = "Status: Sem modelos disponíveis"
+					statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+					task.wait(checkInterval)
+					continue
+				end
+			elseif currentTime - lastCheckTime >= checkInterval then
+				-- A cada 2 segundos, verificar se precisa teleportar novamente
+				lastCheckTime = currentTime
+				
+				-- Teleportar para cima do modelo atual (recall)
+				if teleportToModelTop(currentModel.model, currentModel.part) then
+					statusLabel.Text = "Status: Recall no modelo"
+					statusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+				end
+				
+				-- Procurar próximo modelo alternativo
+				local alternativeModel = getNextModel(currentModel)
+				if alternativeModel then
+					-- Tentar teleportar para o modelo alternativo também
+					if teleportCooldown <= 0 then
+						teleportToModelTop(alternativeModel.model, alternativeModel.part)
+						teleportCooldown = 1 -- Cooldown de 1 segundo entre teleportes alternativos
+						
+						statusLabel.Text = "Status: Alternando entre modelos"
+						statusLabel.TextColor3 = Color3.fromRGB(255, 150, 50)
+						
+						-- Manter referência ao modelo alternativo
+						currentModel = alternativeModel
+					end
+				end
+				
+				if teleportCooldown > 0 then
+					teleportCooldown = teleportCooldown - checkInterval
+				end
+			end
+		else
+			-- Não há modelo atual, procurar um
+			local models = getHumbugModels()
+			
+			if models and #models > 0 then
+				currentModel = models[1]
+				lastCheckTime = currentTime
+				teleportCooldown = 0
+			else
+				statusLabel.Text = "Status: Aguardando modelos..."
+				statusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+				task.wait(checkInterval)
+				continue
+			end
+		end
+		
+		-- Se temos um modelo válido, teleportar e clicar
+		if currentModel and modelExists(currentModel) then
+			-- Teleportar para cima do modelo
+			if teleportToModelTop(currentModel.model, currentModel.part) then
+				statusLabel.Text = "Status: Coletando..."
+				statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+				
+				-- Clicar várias vezes
+				for i = 1, 5 do
+					if not humbugEnabled or not modelExists(currentModel) then
+						break
+					end
+					autoClick()
+					task.wait(clickDelay / 5)
+				end
+			end
+		end
+		
+		task.wait(clickDelay)
+	end
+	
+	-- Limpar ao desligar
+	currentModel = nil
+end
+
+-- Botão de fechar
+closeButton.MouseButton1Click:Connect(function()
+	humbugEnabled = false
+	currentModel = nil
+	screenGui:Destroy()
+end)
+
+-- Botão de toggle
+toggleButton.MouseButton1Click:Connect(function()
+	humbugEnabled = not humbugEnabled
+	
+	if humbugEnabled then
+		toggleButton.Text = "Desligar Modo Humbug"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+		statusLabel.Text = "Status: Ligado"
+		statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+		
+		-- Iniciar loop
+		task.spawn(humbugLoop)
+	else
+		toggleButton.Text = "Ligar Modo Humbug"
+		toggleButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+		statusLabel.Text = "Status: Desligado"
+		statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+	end
+end)
+
+-- Atualizar character quando respawnar
+player.CharacterAdded:Connect(function(newCharacter)
+	character = newCharacter
+	humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+end)
